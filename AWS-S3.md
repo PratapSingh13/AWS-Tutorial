@@ -27,7 +27,27 @@
 
 ### S3 Bucket sub-resurces ###
 #### Sub-Resources for S3 bucket includes: ####
+
 **Lifecycle-** To decide an object lifecycle management.
+
 **Website-** To hold configuration related to static website hosted in S3 bucket.
+
 **Versioning-** Keep object versions as it changes (We can not disable Versioning only we can either enable or suspend it).
+
 **Access Control List-** Bucket accessibility.
+
+### S3 Objects ###
+- An object size stored in an S3 Bucket can be 0byte to 5TB.
+- Each object is stored and retrieved by a unique key (ID or name).
+- An object in AWS S3 is uniquely identified and addressed through 
+  - Service endpoint
+  - Bucket name
+  - Object key (name)
+  - Optionally object version
+- Object stored in a S3 bucket in a region will never leave that region unless you specifically move them to another region or CRR.
+- Bucket owner can grant cross account permission to another AWS account (or user in another account) to upload objects.
+- You can grant S3 bucket/object permission to-
+  - Individual User
+  - AWS account 
+  - Make the resource public 
+  - Or to all authenticate user.
