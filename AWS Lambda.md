@@ -29,3 +29,21 @@
   - Monitoring and troubleshooting
 - In Lambda we can not enter to our Instance, we can not customise it, neither we can not change OS of our lambda and more.
 - If you want to your own compute then you need to choose EC2 or Elastic Beanstalk.
+
+### How Lambda Works! ###
+- First you need to upload your code to lambda in one or more lambda.
+- AWS Lambda will execute the code in your behalf.
+- After the code is invoked lambda automatically provosioning and managing the required servers.
+
+### AWS Lambda vs AWS EC2 ###
+**AWS Lambda**
+- AWS Lambda is a Platform as a Service
+- It supports only limited languages like Node JS, Python, Java, Ruby, Powershell, C#, Golang
+- Write your code and push that into AWS Lambda.
+- You can not log into compute instances, choose customize OS or language platform.
+
+**AWS EC2**
+- EC2 instance is a Infrastructure as a Service
+- Their is no environment restrictions in EC2 like Lambda
+- For the first time in EC2, you have to choose the OS and install all the software and then push your code into EC2.
+- You can select variety of OS and all.
