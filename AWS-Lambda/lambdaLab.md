@@ -80,7 +80,7 @@ So here i uploaded my two of files
 ![alt text](images/20.png "Title Text")
 
 Now go to the DynamoDB and select Table and choose your table name-->Item
-And The BAR IS SET! 
+**And The BAR IS SET!**
 You can see every details of your data like type of file, put/post/get, size etc.
 
 ![alt text](images/21.png "Title Text")
