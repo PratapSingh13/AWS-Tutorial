@@ -1,4 +1,5 @@
-## Storage ##
+## AWS Storage ##
+### Storage ###
 Where we are storing our data is called Storage
 ### Types of Storage in AWS ###
 - *Amazon Simple Storage Service (Amazon S3)*
