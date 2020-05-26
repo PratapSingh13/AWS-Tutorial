@@ -36,14 +36,10 @@
 - After the code is invoked lambda automatically provosioning and managing the required servers.
 
 ### AWS Lambda vs AWS EC2 ###
-**AWS Lambda**
-- AWS Lambda is a Platform as a Service
-- It supports only limited languages like Node JS, Python, Java, Ruby, Powershell, C#, Golang
-- Write your code and push that into AWS Lambda.
-- You can not log into compute instances, choose customize OS or language platform.
 
-**AWS EC2**
-- EC2 instance is a Infrastructure as a Service
-- Their is no environment restrictions in EC2 like Lambda
-- For the first time in EC2, you have to choose the OS and install all the software and then push your code into EC2.
-- You can select variety of OS and all.
+AWS Lambda | AWS EC2
+---------- | -------
+AWS Lambda is a Platform as a Service. | EC2 instance is a Infrastructure as a Service.
+It supports only limited languages like Node JS, Python, Java, Ruby, Powershell, C#, Golang. | Their is no environment restrictions in EC2 like Lambda..
+Write your code and push that into AWS Lambda. | For the first time in EC2, you have to choose the OS and install all the software and then push your code into EC2.
+You can not log into compute instances, choose customize OS or language platform. | You can select variety of OS and all.
