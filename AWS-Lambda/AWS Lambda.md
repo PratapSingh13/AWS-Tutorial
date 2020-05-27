@@ -2,7 +2,7 @@
 ***AWS Lambda*** is the service which computes the code without using server. It is said to be server-less computing.
 - AWS Lambda is a compute service that let you run code without provisioning and managing the servers.
 - With AWS Lambda you can run code for virtually any type of application or backend service or with zero administration.
-(Here zero administartion means that all the things like who will run the code, maintenance, update and everything all will managed by AWS)
+(Here zero administration means that all the things like who will run the code, maintenance, update and everything all will managed by AWS)
 - AWS Lambda manages all the administration it manages: 
   - Provisioning and capacity of comute fleet that offers a balance of memory, CPU, network and other resources.
   - Server and OS maintenance
@@ -33,7 +33,7 @@
 ### How Lambda Works! ###
 - First you need to upload your code to lambda in one or more lambda.
 - AWS Lambda will execute the code in your behalf.
-- After the code is invoked lambda automatically provosioning and managing the required servers.
+- After the code is invoked lambda automatically provisioning and managing the required servers.
 
 ### AWS Lambda vs AWS EC2 ###
 
