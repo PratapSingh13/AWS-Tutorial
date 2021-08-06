@@ -41,7 +41,7 @@ Whenever you are working on large database and for that it needs huge RAM for da
 
 **Instance Storage -** NVMe SSD
 
-## Z1d nstance 
+## Z1d instance 
 *The fastest in any cloud instance*
 
 - High frequency Z1d delivers a sustained all core frequency of **4.0GHz**
