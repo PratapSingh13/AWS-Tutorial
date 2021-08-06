@@ -46,3 +46,26 @@ These instances provides an ideal cloud infrastructure, offering a **balance** o
 **RAM -** min 8GB to max 384GB
 
 **Instance Storage -** EBS & NitroVM SSD (NVMe SSD)
+
+## T2 T3 T3a Instances
+These instances provide a baseline level of CPU performance **(5% to 40%)** with the ability to **burst to a higher level** when required by your workload.
+
+An unlimited instances can sustain high CPU performance for any period of time whenever required.
+
+**Instances are well suited for following for:**
+- Websites and Web app
+- Code Repositories
+- Development, Build, Test
+- Microservices
+
+**It has following configuration:**
+
+**vCPU -** min 2 to max 8
+
+**RAM -** min 0.5GB to max 32B
+
+### Contributors
+[![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
+
+  [yogendra_homepage]: https://github.com/PratapSingh13
+  [yogendra_avatar]: https://img.cloudposse.com/75x75/https://github.com/PratapSingh13.png
