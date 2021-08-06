@@ -1,4 +1,4 @@
-# What is EC2
+# What is EC2 & Types of EC2 Instances
 
 EC2 stands for *Elastic Compute Cloud* 
 
