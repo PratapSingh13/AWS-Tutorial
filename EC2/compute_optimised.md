@@ -22,7 +22,7 @@ c4 instances are optimized for compute intensive workloads and deliver very cost
 
 **Instance Storage -** EBS only
 
-**Network Bandwith -** max 10Gbps
+**Network Bandwith -** upto 10Gbps
 
 **Instances are well suited for following for:**
 - WebServers
@@ -30,6 +30,29 @@ c4 instances are optimized for compute intensive workloads and deliver very cost
 - MMO Gaming
 - Video Encoding
 
+## c5 Instances
+c5 instances are optimized for compute intensive workloads and deliver very cost effective high performance at low price per compute ratio.
+Difference between c4 and c5 is it supports AWS Nitro system (Nitro is a hypervisor which is very fast and very effective).
+
+**It has following configuration:**
+
+**vCPU -** min 2 to max 72
+
+**RAM -** min 4GB to max 192GB
+
+**Instance Storage -** EBS and NVMe SSD
+
+**Network Bandwith -** upto 25Gbps
+
+**Instances are well suited for following for:**
+- High Performance WebServers
+- Gaming
+- Video Encoding
+
+**Important -:**
+- c5 supports max 25 EBS volumes
+- c5 use Elastic Network Adapter
+- c5 uses new Hypwervisor named Nitro
 
 ### Contributors
 [![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
