@@ -139,6 +139,7 @@ Choose your subnet which you want to associate
 ![](images/rt-1.5.png)
 
 **Step-4.2** Add IGW into Route Table
+
 To communicate with Internet you need to attach IGW into your route table, so for this you need to click on **Route** then **edit route**
 
 ![](images/rt-1.6.png)
