@@ -49,11 +49,11 @@ Accelerated Computing Instance family uses hardware, accelerator, or co-proccess
 
 | **Specification** |  **P2** |  **P3**  |
 | :-----: | :--: | :--: |
-| vCPU    | 4 to 64 | 8 to 96 |
-| GPU     | 1 to 16 | 1 to 8  |
-| RAM     | 61GB to 732GB | 61GB to 768GB |
-| GPU RAM | 12GB to 192GB | 8GB to 12GB |
-|  Network Bandwith | 25Gbps | 10Gbps | 
+| **vCPU**    | 4 to 64 | 8 to 96 |
+| **GPU**     | 1 to 16 | 1 to 8  |
+| **RAM**     | 61GB to 732GB | 61GB to 768GB |
+| **GPU RAM** | 12GB to 192GB | 8GB to 12GB |
+| **Network Bandwith** | 25Gbps | 10Gbps | 
 
 **Note -:** P3 supports **CUDAB** & **OpenCI** API while P2 supports **CUDAB** & **OpenCI 1.2**.
 
