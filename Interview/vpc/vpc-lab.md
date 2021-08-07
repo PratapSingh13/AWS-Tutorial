@@ -138,4 +138,15 @@ Choose your subnet which you want to associate
 
 ![](images/rt-1.5.png)
 
+**Step-4.2** Add IGW into Route Table
+To communicate with Internet you need to attach IGW into your route table, so for this you need to click on **Route** then **edit route**
+
+![](images/rt-1.6.png)
+
+Click on **Add Route** button and go for 0.0.0.0/0 destination and select Internet Gateway with appropriate IGW ID.
+
+![](images/rt-1.7.png)
+
+![](images/rt-1.8.png)
+
 And all done.
