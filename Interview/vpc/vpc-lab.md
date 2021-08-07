@@ -77,3 +77,39 @@ Here Your Subnet created successfully.
 
 ![](images/subnet-1.6.png)
 
+**Step-3.0** Let's create *Internet Gateway*
+
+Click on **Internet Gateway** on left pane
+
+Here you will find a IGW which could be either on **Attach** or **Detached** mode.
+
+![](images/IGW-1.1.png)
+
+**Step-3.1** Create Internet Gateway
+
+![](images/IGW-1.2.png)
+
+**Step-3.2** IGW created successfully
+
+Here IGW has been created successfully but notice it is in **detached** mode so we need to attach this to my VPC.
+
+![](images/IGW-1.3.png)
+
+**Step-3.3** Attach IGW to VPC
+
+Click on **Attach to VPC** in *Actions* toggle.
+
+![](images/IGW-1.4.png)
+
+**Step-3.4** Select the VPC
+
+Select your Available VPC in which you want to attach IGW
+
+![](images/IGW-1.5.png)
+
+**Step-3.5** IGW attached to VPC
+
+Here you can clear find a difference the it's status is changed  **detached** to **attached**
+
+![](images/IGW-1.6.png)
+
