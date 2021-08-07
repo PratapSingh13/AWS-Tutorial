@@ -113,3 +113,29 @@ Here you can clear find a difference the it's status is changed  **detached** to
 
 ![](images/IGW-1.6.png)
 
+
+**Step-4.0** Create **Route Table**
+
+If you click on *Route Table in left pane you will be re-directed to Route Table creation page, and here you will find a Route Table is already created for our newly created VPC that is done by AWS. But We will create a new Route Table so click on **Create Route Table**
+
+![](images/rt-1.1.png)
+
+Here you need to give Name of you route table then select VPC ID in which you want to create route table
+
+![](images/rt-1.2.png)
+
+Here your route table has been created
+
+![](images/rt-1.3.png)
+
+**Step-4.1** Subnet Association
+
+Now you need to associate subnets into your newly created route table, so click on *Subnet associations* at bottom.
+
+![](images/rt-1.4.png)
+
+Choose your subnet which you want to associate
+
+![](images/rt-1.5.png)
+
+And all done.
