@@ -67,3 +67,17 @@
 **Answer -** Security groups in a VPC specify which traffic is allowed to or from an Amazon EC2 instance.
 
 Network ACLs operate at the subnet level and evaluate traffic entering and exiting a subnet. Network ACLs can be used to set both Allow and Deny rules. Network ACLs do not filter traffic between instances in the same subnet.
+
+**16.** **Upto what number of Security Group you can associate for a EC2 instance?**
+
+**Answer -** Upto 5
+
+**17.** **Can you able to deny rule in Security Group?**
+
+**Answer -** No in Security Group you can not deny rule but in NACL you can do this.
+
+**18.** **What is difference between Custom NACL and Default NACL**?
+
+**Answer -** Default NACL allows all inbound and outbound traffic but Custom NACL denies all inbound and outbound traffic untill you add rules.
+
+ 
