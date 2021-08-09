@@ -12,3 +12,10 @@ This includes the physical infrastructure, software, and networking capabilities
 
 **Performance Efficiency**
 This pillar is all about computing resources, their ability to meet requirements and to evolve as needs change. It allows your architecture ti=o be flexible and creative will open up more possibilities, and more than likely you'll find yourself
+
+
+### Contributors
+[![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
+
+  [yogendra_homepage]: https://github.com/PratapSingh13
+  [yogendra_avatar]: https://img.cloudposse.com/75x75/https://github.com/PratapSingh13.png
