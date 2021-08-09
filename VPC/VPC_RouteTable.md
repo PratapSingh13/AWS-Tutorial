@@ -226,3 +226,10 @@ If your route table references a prefix list, the following rules apply:
 + If your route table contains a propagated route that overlaps with a route that references a prefix list, the route that references the prefix list takes priority\.
 + If your route table references multiple prefix lists that have overlapping CIDR blocks to different targets, we randomly choose which route takes priority\. Thereafter, the same route always takes priority\.
 + If the CIDR block in a prefix list entry is not valid for the route table, the entry is ignored\. For example, in a subnet route table, if the prefix list contains an entry with a more specific CIDR than the VPC CIDR, that entry is ignored\.
+
+
+### Contributors
+[![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
+
+  [yogendra_homepage]: https://github.com/PratapSingh13
+  [yogendra_avatar]: https://img.cloudposse.com/75x75/https://github.com/PratapSingh13.png
