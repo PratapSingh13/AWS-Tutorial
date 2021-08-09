@@ -43,3 +43,10 @@ AWS Lambda is a Platform as a Service. | EC2 instance is a Infrastructure as a S
 It supports only limited languages like Node JS, Python, Java, Ruby, Powershell, C#, Golang. | Their is no environment restrictions in EC2 like Lambda..
 Write your code and push that into AWS Lambda. | For the first time in EC2, you have to choose the OS and install all the software and then push your code into EC2.
 You can not log into compute instances, choose customize OS or language platform. | You can select variety of OS and all.
+
+
+### Contributors
+[![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
+
+  [yogendra_homepage]: https://github.com/PratapSingh13
+  [yogendra_avatar]: https://img.cloudposse.com/75x75/https://github.com/PratapSingh13.png
