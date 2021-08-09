@@ -56,3 +56,10 @@
 - Bucket Versioning is a S3 bucket sub-resource used to protect against accidental object/data deleted or overwrites.
 (Suppose if we deleted data from S3 and versioning is enable in our bucket then that can be retrieved because data doesn't deleted instead it created as delete marker then we can restore again that data.)
 - Versioning can also be used for data retention and data archive.
+
+
+### Contributors
+[![Yogendra Pratap Singh][yogendra_avatar]][yogendra_homepage]<br/>[Yogendra Pratap Singh][yogendra_homepage] 
+
+  [yogendra_homepage]: https://github.com/PratapSingh13
+  [yogendra_avatar]: https://img.cloudposse.com/75x75/https://github.com/PratapSingh13.png
