@@ -221,6 +221,43 @@ Here I am updating yum library but private server is not able to connect with in
 
 ![](images/ec2-1.13.png)
 
+**Step-6.0** Let's create **VPC Endpoint**
+
+Go into Endpoint in VPC service
+
+![](images/endpoint-1.1.png)
+
+Click on *Create Endpoint* 
+
+![](images/endpoint-1.2.png)
+
+**Step-6.1** Search for **S3 Gateway**
+
+Choose **Gateway** not **interface**
+
+![](images/endpoint-1.3.png)
+
+Select your right VPC
+
+![](images/endpoint-1.4.png)
+
+**Step-6.2** Select **Private Subnet**
+
+![](images/endpoint-1.5.png)
+
+Create Endpoint
+
+![](images/endpoint-1.6.png)
+
+Endpoint has been created
+
+![](images/endpoint-1.7.png)
+
+**Step-6.3** Let's check endpoint 
+
+Now if you try to update yum library then you will able to update.
+![](images/endpoint-1.8.png)
+
 
 And all done.
 
