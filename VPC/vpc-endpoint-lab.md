@@ -1,4 +1,4 @@
-# Let's learn how to create VPC Peering
+# Let's learn how to create VPC Endpoint
 
 **Step-1.0** Search for VPC in search box
 
@@ -77,6 +77,11 @@ Here Your Subnet created successfully.
 
 ![](images/subnet-1.6.png)
 
+**Step-2.5** Create a Private Subnet
+
+![](images/subnet-1.7.png)
+
+
 **Step-3.0** Let's create *Internet Gateway*
 
 Click on **Internet Gateway** on left pane
@@ -134,7 +139,7 @@ Now you need to associate subnets into your newly created route table, so click 
 
 ![](images/rt-1.4.png)
 
-Choose your subnet which you want to associate
+Choose your **Public Subnet** only
 
 ![](images/rt-1.5.png)
 
@@ -150,7 +155,72 @@ Click on **Add Route** button and go for 0.0.0.0/0 destination and select Intern
 
 ![](images/rt-1.8.png)
 
-All set now create one more VPC like above one.
+All set now Let's create EC2 instances now
+
+**Step-5.0** Search for EC2 in search box
+
+![](images/ec2-1.1.png)
+
+**Step-5.1** Create EC2 Instance
+
+Click on **Launch Instances*
+
+![](images/ec2-1.2.png)
+
+Select your desired AMI here I choosed **Amazon Linux 2**
+
+![](images/ec2-1.3.png)
+
+**Step-5.2** Configure Instance details
+
+Here I give my newly created VPC and with Private Subnet **disable auto assign public IP** for Private Subnet instance
+
+[](images/ec2-1.4.png)
+
+Add tags
+
+[](images/ec2-1.5.png)
+
+Create Security Group in which I take port 22 for SSH.
+
+[](images/ec2-1.6.png)
+
+Then Launch it.
+
+**Step-5.3** Create one more instance
+
+Here I give my newly created VPC but this time with  Public Subnet and **enableauto assign public IP** for  Subnet 
+
+[](images/ec2-1.7.png)
+
+Select same one Security Group
+
+[](images/ec2-1.8.png)
+
+Our Servers has been created
+
+[](images/ec2-1.9.png)
+
+**Step-5.4** Let's connect with Public Instance 
+
+[](images/ec2-1.10.png)
+
+**Step-5.5** Copy your pem file into public server 
+
+[](images/ec2-1.11.png)
+
+**Step-5.6** Let's connect to Private Server
+
+Here you will able to connect with Private Serever
+
+[](images/ec2-1.12.png)
+
+**Step-5.7** Let's check internet communication
+
+Here I am updating yum library but private server is not able to connect with internet because we don't have NAT gateway or VPC endpoint for this
+
+[](images/ec2-1.13.png)
+
 
 And all done.
 

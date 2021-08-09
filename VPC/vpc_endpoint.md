@@ -15,6 +15,8 @@ If you want to use your AWS resorces without go to the Internet so this is possi
 ## Need of VPC EndPoint<a name="need-of-vpc-endpoint"></a>
 Till now what we did that we created VPC and NAT gateway and connected NAT with public subnet, if anyone wants to connect with private instance or wants to go on internet using private instance then we have to go from using NAT Gateway. But the problem with NAT Gateway is it is very costly you have to pay huge amount for data transfer via NAT gateway. But here VPC endpoint is completely free you have to pay for only data transfer and that is very minimal charge.
 
+**Note-:** VPC Endpoint is a kind of substitue for NAT Gateway.
+
 
 
 ### Contributors
