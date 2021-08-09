@@ -165,7 +165,7 @@ All set now Let's create EC2 instances now
 
 Click on **Launch Instances*
 
-![](images/ec2-1.2.png)
+![](images/ec2-1.1.png)
 
 Select your desired AMI here I choosed **Amazon Linux 2**
 
@@ -175,15 +175,15 @@ Select your desired AMI here I choosed **Amazon Linux 2**
 
 Here I give my newly created VPC and with Private Subnet **disable auto assign public IP** for Private Subnet instance
 
-[](images/ec2-1.4.png)
+![](images/ec2-1.4.png)
 
 Add tags
 
-[](images/ec2-1.5.png)
+![](images/ec2-1.5.png)
 
 Create Security Group in which I take port 22 for SSH.
 
-[](images/ec2-1.6.png)
+![](images/ec2-1.6.png)
 
 Then Launch it.
 
@@ -191,35 +191,35 @@ Then Launch it.
 
 Here I give my newly created VPC but this time with  Public Subnet and **enableauto assign public IP** for  Subnet 
 
-[](images/ec2-1.7.png)
+![](images/ec2-1.7.png)
 
 Select same one Security Group
 
-[](images/ec2-1.8.png)
+![](images/ec2-1.8.png)
 
 Our Servers has been created
 
-[](images/ec2-1.9.png)
+![](images/ec2-1.9.png)
 
 **Step-5.4** Let's connect with Public Instance 
 
-[](images/ec2-1.10.png)
+![](images/ec2-1.10.png)
 
 **Step-5.5** Copy your pem file into public server 
 
-[](images/ec2-1.11.png)
+![](images/ec2-1.11.png)
 
 **Step-5.6** Let's connect to Private Server
 
 Here you will able to connect with Private Serever
 
-[](images/ec2-1.12.png)
+![](images/ec2-1.12.png)
 
 **Step-5.7** Let's check internet communication
 
 Here I am updating yum library but private server is not able to connect with internet because we don't have NAT gateway or VPC endpoint for this
 
-[](images/ec2-1.13.png)
+![](images/ec2-1.13.png)
 
 
 And all done.
