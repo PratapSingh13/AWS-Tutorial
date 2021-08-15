@@ -189,7 +189,7 @@ Then Launch it.
 
 **Step-5.3** Create one more instance
 
-Here I give my newly created VPC but this time with  Public Subnet and **enableauto assign public IP** for  Subnet 
+Here I give my newly created VPC but this time with  Public Subnet and **enable auto assign public IP** for  Subnet 
 
 ![](images/ec2-1.7.png)
 
