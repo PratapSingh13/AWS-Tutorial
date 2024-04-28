@@ -28,7 +28,7 @@
 
 **6.** **What is NAT Gateway and tell me it's use case?**
 
-**Answer -** NAT stands for Network it uses to convert private ip into public ip and make forward and vice versa, You can use NAT gateway to enable instances in a Private subnet to connect to the internet.
+**Answer -** NAT stands for Network Address Translation Gateway it uses to convert private ip into public ip and make forward and vice versa, You can use NAT gateway to enable instances in a Private subnet to connect to the internet.
 
 **7.** **In what type of Subnet you will use NAT Gateway?**
 
