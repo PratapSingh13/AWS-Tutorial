@@ -1,0 +1,974 @@
+<h1 id="aws-deployment-guide---bitbucket-security-scanner">AWS
+Deployment Guide - Bitbucket Security Scanner</h1>
+<h2 id="overview">Overview</h2>
+<p>This guide provides step-by-step instructions for deploying the
+Bitbucket Security Scanner in AWS. The scanner connects to your
+Bitbucket Server (in your data center) and performs security analysis
+using AWS Bedrock.</p>
+<hr />
+<h2 id="table-of-contents">📋 Table of Contents</h2>
+<ol type="1">
+<li><a href="#architecture-overview">Architecture Overview</a></li>
+<li><a href="#prerequisites">Prerequisites</a></li>
+<li><a href="#aws-resources-required">AWS Resources Required</a></li>
+<li><a href="#step-by-step-deployment">Step-by-Step Deployment</a></li>
+<li><a href="#configuration">Configuration</a></li>
+<li><a href="#running-the-scanner">Running the Scanner</a></li>
+<li><a href="#automation-options">Automation Options</a></li>
+<li><a href="#monitoring--logging">Monitoring &amp; Logging</a></li>
+<li><a href="#cost-estimates">Cost Estimates</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ol>
+<hr />
+<h2 id="architecture-overview">🏗️ Architecture Overview</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                          AWS Cloud                              │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────┐     │
+│  │ EC2 Instance (Scanner)                               │     │
+│  │ ┌──────────────────────────────────────────────┐     │     │
+│  │ │ - Python 3.10+                                │     │     │
+│  │ │ - Git                                         │     │     │
+│  │ │ - Security Scanner Application                │     │     │
+│  │ │ - IAM Role (Bedrock permissions)              │     │     │
+│  │ └──────────────────────────────────────────────┘     │     │
+│  │                      │                               │     │
+│  │                      │ VPC Peering / VPN             │     │
+│  │                      ▼                               │     │
+│  └──────────────────────┼───────────────────────────────┘     │
+│                         │                                     │
+│         ┌───────────────┼────────────────┐                   │
+│         │               │                │                   │
+│         ▼               ▼                ▼                   │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐              │
+│  │ AWS      │    │ S3       │    │ Secrets  │              │
+│  │ Bedrock  │    │ Bucket   │    │ Manager  │              │
+│  │ (Claude) │    │ (Reports)│    │ (Creds)  │              │
+│  └──────────┘    └──────────┘    └──────────┘              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+                         │
+                         │ HTTPS
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Your Data Center                               │
+│                                                             │
+│         ┌────────────────────────────┐                     │
+│         │  Bitbucket Server          │                     │
+│         │  (Self-hosted)             │                     │
+│         └────────────────────────────┘                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+<hr />
+<h2 id="prerequisites">✅ Prerequisites</h2>
+<h3 id="aws-account"><strong>1. AWS Account</strong></h3>
+<ul>
+<li>Active AWS account with admin access</li>
+<li>AWS CLI installed and configured locally</li>
+</ul>
+<h3 id="bitbucket-server-access"><strong>2. Bitbucket Server
+Access</strong></h3>
+<ul>
+<li>Bitbucket Server URL accessible from AWS</li>
+<li>Personal Access Token (PAT) with:
+<ul>
+<li>Projects: Read</li>
+<li>Repositories: Read</li>
+</ul></li>
+</ul>
+<h3 id="network-connectivity"><strong>3. Network
+Connectivity</strong></h3>
+<ul>
+<li>VPN connection or VPC peering between AWS and your data center</li>
+<li>Firewall rules allowing AWS → Bitbucket Server (HTTPS/443)</li>
+</ul>
+<h3 id="tools-required"><strong>4. Tools Required</strong></h3>
+<ul>
+<li>AWS CLI v2</li>
+<li>Terraform (optional, for IaC)</li>
+<li>SSH key pair for EC2 access</li>
+</ul>
+<hr />
+<h2 id="aws-resources-required">🛠️ AWS Resources Required</h2>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 25%" />
+<col style="width: 45%" />
+</colgroup>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Purpose</th>
+<th>Estimated Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EC2 Instance</strong></td>
+<td>Run scanner (t3.medium)</td>
+<td>~$30/month</td>
+</tr>
+<tr>
+<td><strong>S3 Bucket</strong></td>
+<td>Store security reports</td>
+<td>~$1-5/month</td>
+</tr>
+<tr>
+<td><strong>AWS Bedrock</strong></td>
+<td>AI analysis (Claude 3.5)</td>
+<td>Pay-per-use (~$0.003-0.015 per scan)</td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td>Store Bitbucket credentials</td>
+<td>~$0.40/month</td>
+</tr>
+<tr>
+<td><strong>CloudWatch Logs</strong></td>
+<td>Application logging</td>
+<td>~$0.50/month</td>
+</tr>
+<tr>
+<td><strong>VPC</strong></td>
+<td>Network isolation</td>
+<td>Free (if using default VPC)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total Estimated Cost</strong>: ~$35-40/month + Bedrock
+usage</p>
+<hr />
+<h2 id="step-by-step-deployment">📝 Step-by-Step Deployment</h2>
+<h3 id="step-1-create-iam-role-for-ec2"><strong>Step 1: Create IAM Role
+for EC2</strong></h3>
+<p>This role allows the EC2 instance to access Bedrock and S3.</p>
+<p><strong>1.1 Create IAM Policy for Bedrock</strong></p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-policy <span class="dt">\</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-name</span> BitbucketScannerBedrockPolicy <span class="dt">\</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-document</span> <span class="st">&#39;{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Statement&quot;: [</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="st">      {</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Action&quot;: [</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;bedrock:InvokeModel&quot;</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="st">        ],</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Resource&quot;: &quot;arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0&quot;</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="st">    ]</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<p><strong>1.2 Create IAM Policy for S3</strong></p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-policy <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-name</span> BitbucketScannerS3Policy <span class="dt">\</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-document</span> <span class="st">&#39;{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Statement&quot;: [</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="st">      {</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Action&quot;: [</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;s3:PutObject&quot;,</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;s3:GetObject&quot;,</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;s3:ListBucket&quot;</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="st">        ],</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Resource&quot;: [</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;arn:aws:s3:::bitbucket-security-reports&quot;,</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;arn:aws:s3:::bitbucket-security-reports/*&quot;</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a><span class="st">        ]</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a><span class="st">    ]</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<p><strong>1.3 Create IAM Policy for Secrets Manager</strong></p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-policy <span class="dt">\</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-name</span> BitbucketScannerSecretsPolicy <span class="dt">\</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-document</span> <span class="st">&#39;{</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Statement&quot;: [</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="st">      {</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Action&quot;: [</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;secretsmanager:GetSecretValue&quot;</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="st">        ],</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Resource&quot;: &quot;arn:aws:secretsmanager:us-east-1:*:secret:bitbucket-scanner-*&quot;</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="st">    ]</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<p><strong>1.4 Create IAM Role</strong></p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-role <span class="dt">\</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--role-name</span> BitbucketScannerRole <span class="dt">\</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--assume-role-policy-document</span> <span class="st">&#39;{</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Version&quot;: &quot;2012-10-17&quot;,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Statement&quot;: [</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="st">      {</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Effect&quot;: &quot;Allow&quot;,</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Principal&quot;: {</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;Service&quot;: &quot;ec2.amazonaws.com&quot;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="st">        },</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Action&quot;: &quot;sts:AssumeRole&quot;</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="st">    ]</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<p><strong>1.5 Attach Policies to Role</strong></p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Get your AWS account ID</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="va">ACCOUNT_ID</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> sts get-caller-identity <span class="at">--query</span> Account <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Attach policies</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam attach-role-policy <span class="dt">\</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--role-name</span> BitbucketScannerRole <span class="dt">\</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-arn</span> arn:aws:iam::<span class="va">${ACCOUNT_ID}</span>:policy/BitbucketScannerBedrockPolicy</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam attach-role-policy <span class="dt">\</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--role-name</span> BitbucketScannerRole <span class="dt">\</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-arn</span> arn:aws:iam::<span class="va">${ACCOUNT_ID}</span>:policy/BitbucketScannerS3Policy</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam attach-role-policy <span class="dt">\</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--role-name</span> BitbucketScannerRole <span class="dt">\</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--policy-arn</span> arn:aws:iam::<span class="va">${ACCOUNT_ID}</span>:policy/BitbucketScannerSecretsPolicy</span></code></pre></div>
+<p><strong>1.6 Create Instance Profile</strong></p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam create-instance-profile <span class="dt">\</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--instance-profile-name</span> BitbucketScannerInstanceProfile</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> iam add-role-to-instance-profile <span class="dt">\</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--instance-profile-name</span> BitbucketScannerInstanceProfile <span class="dt">\</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--role-name</span> BitbucketScannerRole</span></code></pre></div>
+<hr />
+<h3 id="step-2-enable-aws-bedrock"><strong>Step 2: Enable AWS
+Bedrock</strong></h3>
+<p><strong>2.1 Request Model Access</strong></p>
+<ol type="1">
+<li>Go to AWS Console → Bedrock → Model access</li>
+<li>Click <strong>“Modify model access”</strong></li>
+<li>Select <strong>“Anthropic Claude 3.5 Sonnet”</strong></li>
+<li>Click <strong>“Request model access”</strong></li>
+<li>Wait for approval (usually instant)</li>
+</ol>
+<p><strong>2.2 Verify Access (via CLI)</strong></p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> bedrock list-foundation-models <span class="dt">\</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--region</span> us-east-1 <span class="dt">\</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;modelSummaries[?contains(modelId, `claude-3-5-sonnet`)].modelId&#39;</span></span></code></pre></div>
+<p>Expected output:</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ot">[</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;anthropic.claude-3-5-sonnet-20241022-v2:0&quot;</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div>
+<hr />
+<h3 id="step-3-create-s3-bucket-for-reports"><strong>Step 3: Create S3
+Bucket for Reports</strong></h3>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create bucket</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3 mb s3://bitbucket-security-reports <span class="at">--region</span> us-east-1</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Enable versioning</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3api put-bucket-versioning <span class="dt">\</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--bucket</span> bitbucket-security-reports <span class="dt">\</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--versioning-configuration</span> Status=Enabled</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Set lifecycle policy (optional - delete old reports after 90 days)</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3api put-bucket-lifecycle-configuration <span class="dt">\</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--bucket</span> bitbucket-security-reports <span class="dt">\</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--lifecycle-configuration</span> <span class="st">&#39;{</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;Rules&quot;: [</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="st">      {</span></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Id&quot;: &quot;DeleteOldReports&quot;,</span></span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Status&quot;: &quot;Enabled&quot;,</span></span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Expiration&quot;: {</span></span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;Days&quot;: 90</span></span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a><span class="st">        }</span></span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a><span class="st">    ]</span></span>
+<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span></span></code></pre></div>
+<hr />
+<h3
+id="step-4-store-bitbucket-credentials-in-secrets-manager"><strong>Step
+4: Store Bitbucket Credentials in Secrets Manager</strong></h3>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> secretsmanager create-secret <span class="dt">\</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--name</span> bitbucket-scanner-credentials <span class="dt">\</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--description</span> <span class="st">&quot;Bitbucket Server credentials for security scanner&quot;</span> <span class="dt">\</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--secret-string</span> <span class="st">&#39;{</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;server_url&quot;: &quot;https://bitbucket.yourcompany.com&quot;,</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;username&quot;: &quot;scanner-user&quot;,</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;pat_token&quot;: &quot;YOUR_PERSONAL_ACCESS_TOKEN_HERE&quot;</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span> <span class="dt">\</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--region</span> us-east-1</span></code></pre></div>
+<hr />
+<h3 id="step-5-launch-ec2-instance"><strong>Step 5: Launch EC2
+Instance</strong></h3>
+<p><strong>5.1 Create Security Group</strong></p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create security group</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 create-security-group <span class="dt">\</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--group-name</span> bitbucket-scanner-sg <span class="dt">\</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--description</span> <span class="st">&quot;Security group for Bitbucket scanner&quot;</span> <span class="dt">\</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--vpc-id</span> vpc-xxxxxxxx</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Get the security group ID</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a><span class="va">SG_ID</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 describe-security-groups <span class="dt">\</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--filters</span> <span class="st">&quot;Name=group-name,Values=bitbucket-scanner-sg&quot;</span> <span class="dt">\</span></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;SecurityGroups[0].GroupId&#39;</span> <span class="dt">\</span></span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Allow SSH from your IP (replace with your IP)</span></span>
+<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 authorize-security-group-ingress <span class="dt">\</span></span>
+<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--group-id</span> <span class="va">$SG_ID</span> <span class="dt">\</span></span>
+<span id="cb12-16"><a href="#cb12-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">--protocol</span> tcp <span class="dt">\</span></span>
+<span id="cb12-17"><a href="#cb12-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--port</span> 22 <span class="dt">\</span></span>
+<span id="cb12-18"><a href="#cb12-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--cidr</span> YOUR_IP/32</span>
+<span id="cb12-19"><a href="#cb12-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-20"><a href="#cb12-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Allow outbound HTTPS to Bitbucket Server (if needed)</span></span>
+<span id="cb12-21"><a href="#cb12-21" aria-hidden="true" tabindex="-1"></a><span class="co"># This may already be allowed by default egress rules</span></span></code></pre></div>
+<p><strong>5.2 Launch EC2 Instance</strong></p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 run-instances <span class="dt">\</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--image-id</span> ami-0c55b159cbfafe1f0 <span class="dt">\</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--count</span> 1 <span class="dt">\</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--instance-type</span> t3.medium <span class="dt">\</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--key-name</span> YOUR_SSH_KEY_NAME <span class="dt">\</span></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--security-group-ids</span> <span class="va">$SG_ID</span> <span class="dt">\</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--iam-instance-profile</span> Name=BitbucketScannerInstanceProfile <span class="dt">\</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--block-device-mappings</span> <span class="st">&#39;[{&quot;DeviceName&quot;:&quot;/dev/xvda&quot;,&quot;Ebs&quot;:{&quot;VolumeSize&quot;:30,&quot;VolumeType&quot;:&quot;gp3&quot;}}]&#39;</span> <span class="dt">\</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag-specifications</span> <span class="st">&#39;ResourceType=instance,Tags=[{Key=Name,Value=bitbucket-scanner}]&#39;</span> <span class="dt">\</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--user-data</span> file://user-data.sh</span></code></pre></div>
+<p><strong>5.3 Create <code>user-data.sh</code> (Bootstrap
+Script)</strong></p>
+<p>Save this as <code>user-data.sh</code>:</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> <span class="at">-e</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Update system</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="ex">yum</span> update <span class="at">-y</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Install Python 3.10</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a><span class="ex">amazon-linux-extras</span> install python3.8 <span class="at">-y</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a><span class="ex">yum</span> install python3-pip git <span class="at">-y</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Create application directory</span></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /opt/bitbucket-scanner</span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/bitbucket-scanner</span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Clone scanner repository (replace with your repo)</span></span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 1: From your Git repository</span></span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a><span class="co"># git clone https://your-git-server.com/path/to/scanner.git .</span></span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Option 2: Upload manually after instance launch</span></span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a><span class="co"># (We&#39;ll do this in Step 6)</span></span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Install AWS CLI v2</span></span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="st">&quot;https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip&quot;</span> <span class="at">-o</span> <span class="st">&quot;awscliv2.zip&quot;</span></span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a><span class="fu">unzip</span> awscliv2.zip</span>
+<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a><span class="ex">./aws/install</span></span>
+<span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a><span class="co"># Create logs directory</span></span>
+<span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /var/log/bitbucket-scanner</span>
+<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Set up CloudWatch Logs agent (optional but recommended)</span></span>
+<span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a><span class="fu">wget</span> https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm</span>
+<span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a><span class="ex">rpm</span> <span class="at">-U</span> ./amazon-cloudwatch-agent.rpm</span>
+<span id="cb14-33"><a href="#cb14-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a><span class="co"># Done</span></span>
+<span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Bootstrap complete&quot;</span> <span class="op">&gt;</span> /var/log/bootstrap-complete.log</span></code></pre></div>
+<hr />
+<h3 id="step-6-install-scanner-application"><strong>Step 6: Install
+Scanner Application</strong></h3>
+<p><strong>6.1 SSH into EC2 Instance</strong></p>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Get instance public IP</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="va">INSTANCE_IP</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> ec2 describe-instances <span class="dt">\</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--filters</span> <span class="st">&quot;Name=tag:Name,Values=bitbucket-scanner&quot;</span> <span class="st">&quot;Name=instance-state-name,Values=running&quot;</span> <span class="dt">\</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;Reservations[0].Instances[0].PublicIpAddress&#39;</span> <span class="dt">\</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="co"># SSH into instance</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> <span class="at">-i</span> your-key.pem ec2-user@<span class="va">$INSTANCE_IP</span></span></code></pre></div>
+<p><strong>6.2 Upload Scanner Code</strong></p>
+<p>From your local machine:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a zip of the scanner</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="fu">zip</span> <span class="at">-r</span> scanner.zip . <span class="at">-x</span> <span class="st">&quot;*.git*&quot;</span> <span class="st">&quot;*.pyc&quot;</span> <span class="st">&quot;__pycache__/*&quot;</span> <span class="st">&quot;venv/*&quot;</span> <span class="st">&quot;security_reports/*&quot;</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Copy to EC2</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="fu">scp</span> <span class="at">-i</span> your-key.pem scanner.zip ec2-user@<span class="va">$INSTANCE_IP</span>:/tmp/</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="co"># On EC2 instance</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/bitbucket-scanner</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a><span class="fu">unzip</span> /tmp/scanner.zip</span></code></pre></div>
+<p><strong>6.3 Install Python Dependencies</strong></p>
+<p>On EC2 instance:</p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/bitbucket-scanner</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Create virtual environment</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-m</span> venv venv</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Install dependencies</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">--upgrade</span> pip</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-r</span> requirements.txt</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify installation</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-c</span> <span class="st">&quot;import boto3; import git; import click; print(&#39;All dependencies installed&#39;)&quot;</span></span></code></pre></div>
+<hr />
+<h3 id="step-7-configure-scanner"><strong>Step 7: Configure
+Scanner</strong></h3>
+<p><strong>7.1 Create Configuration Script</strong></p>
+<p>On EC2 instance, create
+<code>/opt/bitbucket-scanner/load-config.sh</code>:</p>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Load configuration from Secrets Manager</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Get secrets</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a><span class="va">SECRET</span><span class="op">=</span><span class="va">$(</span><span class="ex">aws</span> secretsmanager get-secret-value <span class="dt">\</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--secret-id</span> bitbucket-scanner-credentials <span class="dt">\</span></span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--region</span> us-east-1 <span class="dt">\</span></span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> SecretString <span class="dt">\</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--output</span> text<span class="va">)</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract values</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BITBUCKET_SERVER_URL</span><span class="op">=</span><span class="va">$(</span><span class="bu">echo</span> <span class="va">$SECRET</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .server_url<span class="va">)</span></span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BITBUCKET_USERNAME</span><span class="op">=</span><span class="va">$(</span><span class="bu">echo</span> <span class="va">$SECRET</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .username<span class="va">)</span></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BITBUCKET_PAT</span><span class="op">=</span><span class="va">$(</span><span class="bu">echo</span> <span class="va">$SECRET</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="at">-r</span> .pat_token<span class="va">)</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BITBUCKET_SSL_VERIFY</span><span class="op">=</span>true</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a><span class="co"># AI Configuration</span></span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">AI_ENABLED</span><span class="op">=</span>true</span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">AI_PROVIDER</span><span class="op">=</span>bedrock</span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BEDROCK_REGION</span><span class="op">=</span>us-east-1</span>
+<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BEDROCK_MODEL_ID</span><span class="op">=</span>anthropic.claude-3-5-sonnet-20241022-v2:0</span></code></pre></div>
+<p>Make it executable:</p>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x /opt/bitbucket-scanner/load-config.sh</span></code></pre></div>
+<p><strong>7.2 Create .env File (Alternative)</strong></p>
+<p>Or create <code>.env</code> file directly:</p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> <span class="op">&gt;</span> /opt/bitbucket-scanner/.env <span class="op">&lt;&lt; &#39;EOF&#39;</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="st"># Bitbucket Server Configuration</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="st">BITBUCKET_SERVER_URL=https://bitbucket.yourcompany.com</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="st">BITBUCKET_USERNAME=scanner-user</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a><span class="st">BITBUCKET_PAT=YOUR_PAT_TOKEN_HERE</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a><span class="st">BITBUCKET_SSL_VERIFY=true</span></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a><span class="st"># AI Configuration</span></span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a><span class="st">AI_ENABLED=true</span></span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a><span class="st">AI_PROVIDER=bedrock</span></span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a><span class="st">BEDROCK_REGION=us-east-1</span></span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a><span class="st">BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0</span></span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span></code></pre></div>
+<hr />
+<h3 id="step-8-test-the-scanner"><strong>Step 8: Test the
+Scanner</strong></h3>
+<p><strong>8.1 Manual Test</strong></p>
+<div class="sourceCode" id="cb21"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/bitbucket-scanner</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> load-config.sh  <span class="co"># Or use .env file</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Test scan</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scan_repos.py <span class="dt">\</span></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--project</span> TEST <span class="dt">\</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--repo</span> test-repo <span class="dt">\</span></span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--ai</span></span></code></pre></div>
+<p><strong>8.2 Verify Output</strong></p>
+<div class="sourceCode" id="cb22"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check if report was generated</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-la</span> security_reports/</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="co"># View report</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> security_reports/test-repo/report_<span class="pp">*</span>.md</span></code></pre></div>
+<p><strong>8.3 Upload to S3 (Optional)</strong></p>
+<div class="sourceCode" id="cb23"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Upload reports to S3</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3 sync security_reports/ s3://bitbucket-security-reports/</span></code></pre></div>
+<hr />
+<h2 id="automation-options">🤖 Automation Options</h2>
+<h3 id="option-1-scheduled-scans-with-cron"><strong>Option 1: Scheduled
+Scans with Cron</strong></h3>
+<p><strong>1.1 Create Scan Script</strong></p>
+<p>Create <code>/opt/bitbucket-scanner/run-scan.sh</code>:</p>
+<div class="sourceCode" id="cb24"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> <span class="at">-e</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Configuration</span></span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a><span class="va">PROJECT_KEY</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span></span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a><span class="va">REPO_SLUG</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$2</span><span class="st">&quot;</span></span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a><span class="va">BRANCH</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${3</span><span class="op">:-</span>master<span class="va">}</span><span class="st">&quot;</span></span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Paths</span></span>
+<span id="cb24-10"><a href="#cb24-10" aria-hidden="true" tabindex="-1"></a><span class="va">SCANNER_DIR</span><span class="op">=</span><span class="st">&quot;/opt/bitbucket-scanner&quot;</span></span>
+<span id="cb24-11"><a href="#cb24-11" aria-hidden="true" tabindex="-1"></a><span class="va">LOG_DIR</span><span class="op">=</span><span class="st">&quot;/var/log/bitbucket-scanner&quot;</span></span>
+<span id="cb24-12"><a href="#cb24-12" aria-hidden="true" tabindex="-1"></a><span class="va">TIMESTAMP</span><span class="op">=</span><span class="va">$(</span><span class="fu">date</span> +%Y%m%d_%H%M%S<span class="va">)</span></span>
+<span id="cb24-13"><a href="#cb24-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-14"><a href="#cb24-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Logging</span></span>
+<span id="cb24-15"><a href="#cb24-15" aria-hidden="true" tabindex="-1"></a><span class="bu">exec</span> <span class="dv">1</span><span class="op">&gt;</span> <span class="op">&gt;(</span><span class="fu">tee</span> <span class="at">-a</span> <span class="st">&quot;</span><span class="va">${LOG_DIR}</span><span class="st">/scan_</span><span class="va">${PROJECT_KEY}</span><span class="st">_</span><span class="va">${REPO_SLUG}</span><span class="st">_</span><span class="va">${TIMESTAMP}</span><span class="st">.log&quot;</span><span class="op">)</span></span>
+<span id="cb24-16"><a href="#cb24-16" aria-hidden="true" tabindex="-1"></a><span class="bu">exec</span> <span class="dv">2</span><span class="op">&gt;&amp;</span><span class="dv">1</span></span>
+<span id="cb24-17"><a href="#cb24-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-18"><a href="#cb24-18" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;====================================&quot;</span></span>
+<span id="cb24-19"><a href="#cb24-19" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Starting scan at </span><span class="va">$(</span><span class="fu">date</span><span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb24-20"><a href="#cb24-20" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Project: </span><span class="va">${PROJECT_KEY}</span><span class="st">&quot;</span></span>
+<span id="cb24-21"><a href="#cb24-21" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Repository: </span><span class="va">${REPO_SLUG}</span><span class="st">&quot;</span></span>
+<span id="cb24-22"><a href="#cb24-22" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Branch: </span><span class="va">${BRANCH}</span><span class="st">&quot;</span></span>
+<span id="cb24-23"><a href="#cb24-23" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;====================================&quot;</span></span>
+<span id="cb24-24"><a href="#cb24-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-25"><a href="#cb24-25" aria-hidden="true" tabindex="-1"></a><span class="co"># Activate virtual environment</span></span>
+<span id="cb24-26"><a href="#cb24-26" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> <span class="va">${SCANNER_DIR}</span></span>
+<span id="cb24-27"><a href="#cb24-27" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span>
+<span id="cb24-28"><a href="#cb24-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-29"><a href="#cb24-29" aria-hidden="true" tabindex="-1"></a><span class="co"># Load configuration</span></span>
+<span id="cb24-30"><a href="#cb24-30" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> load-config.sh</span>
+<span id="cb24-31"><a href="#cb24-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-32"><a href="#cb24-32" aria-hidden="true" tabindex="-1"></a><span class="co"># Run scan</span></span>
+<span id="cb24-33"><a href="#cb24-33" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scan_repos.py <span class="dt">\</span></span>
+<span id="cb24-34"><a href="#cb24-34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--project</span> <span class="va">${PROJECT_KEY}</span> <span class="dt">\</span></span>
+<span id="cb24-35"><a href="#cb24-35" aria-hidden="true" tabindex="-1"></a>  <span class="at">--repo</span> <span class="va">${REPO_SLUG}</span> <span class="dt">\</span></span>
+<span id="cb24-36"><a href="#cb24-36" aria-hidden="true" tabindex="-1"></a>  <span class="at">--branch</span> <span class="va">${BRANCH}</span> <span class="dt">\</span></span>
+<span id="cb24-37"><a href="#cb24-37" aria-hidden="true" tabindex="-1"></a>  <span class="at">--ai</span></span>
+<span id="cb24-38"><a href="#cb24-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-39"><a href="#cb24-39" aria-hidden="true" tabindex="-1"></a><span class="co"># Upload to S3</span></span>
+<span id="cb24-40"><a href="#cb24-40" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Uploading reports to S3...&quot;</span></span>
+<span id="cb24-41"><a href="#cb24-41" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3 sync security_reports/ s3://bitbucket-security-reports/<span class="va">$(</span><span class="fu">date</span> +%Y-%m-%d<span class="va">)</span>/</span>
+<span id="cb24-42"><a href="#cb24-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-43"><a href="#cb24-43" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;====================================&quot;</span></span>
+<span id="cb24-44"><a href="#cb24-44" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;Scan completed at </span><span class="va">$(</span><span class="fu">date</span><span class="va">)</span><span class="st">&quot;</span></span>
+<span id="cb24-45"><a href="#cb24-45" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;====================================&quot;</span></span></code></pre></div>
+<p>Make it executable:</p>
+<div class="sourceCode" id="cb25"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x /opt/bitbucket-scanner/run-scan.sh</span></code></pre></div>
+<p><strong>1.2 Set Up Cron Job</strong></p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Edit crontab</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="fu">crontab</span> <span class="at">-e</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Add cron jobs (example: scan daily at 2 AM)</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a><span class="ex">0</span> 2 <span class="pp">*</span> <span class="pp">*</span> <span class="pp">*</span> /opt/bitbucket-scanner/run-scan.sh MYPROJ backend-api master</span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a><span class="ex">0</span> 3 <span class="pp">*</span> <span class="pp">*</span> <span class="pp">*</span> /opt/bitbucket-scanner/run-scan.sh MYPROJ frontend-app master</span>
+<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a><span class="ex">0</span> 4 <span class="pp">*</span> <span class="pp">*</span> <span class="pp">*</span> /opt/bitbucket-scanner/run-scan.sh DATA data-pipeline develop</span></code></pre></div>
+<hr />
+<h3 id="option-2-eventbridge-scheduled"><strong>Option 2: EventBridge
+(Scheduled)</strong></h3>
+<p><strong>2.1 Create Lambda Function</strong> (to invoke SSM Run
+Command)</p>
+<p>Create <code>lambda_function.py</code>:</p>
+<div class="sourceCode" id="cb27"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> boto3</span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> json</span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>ssm <span class="op">=</span> boto3.client(<span class="st">&#39;ssm&#39;</span>)</span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> lambda_handler(event, context):</span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;</span></span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a><span class="co">    Trigger scanner via SSM Run Command</span></span>
+<span id="cb27-9"><a href="#cb27-9" aria-hidden="true" tabindex="-1"></a><span class="co">    &quot;&quot;&quot;</span></span>
+<span id="cb27-10"><a href="#cb27-10" aria-hidden="true" tabindex="-1"></a>    project <span class="op">=</span> event.get(<span class="st">&#39;project&#39;</span>)</span>
+<span id="cb27-11"><a href="#cb27-11" aria-hidden="true" tabindex="-1"></a>    repo <span class="op">=</span> event.get(<span class="st">&#39;repo&#39;</span>)</span>
+<span id="cb27-12"><a href="#cb27-12" aria-hidden="true" tabindex="-1"></a>    branch <span class="op">=</span> event.get(<span class="st">&#39;branch&#39;</span>, <span class="st">&#39;master&#39;</span>)</span>
+<span id="cb27-13"><a href="#cb27-13" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb27-14"><a href="#cb27-14" aria-hidden="true" tabindex="-1"></a>    response <span class="op">=</span> ssm.send_command(</span>
+<span id="cb27-15"><a href="#cb27-15" aria-hidden="true" tabindex="-1"></a>        InstanceIds<span class="op">=</span>[<span class="st">&#39;i-xxxxxxxxx&#39;</span>],  <span class="co"># Your EC2 instance ID</span></span>
+<span id="cb27-16"><a href="#cb27-16" aria-hidden="true" tabindex="-1"></a>        DocumentName<span class="op">=</span><span class="st">&#39;AWS-RunShellScript&#39;</span>,</span>
+<span id="cb27-17"><a href="#cb27-17" aria-hidden="true" tabindex="-1"></a>        Parameters<span class="op">=</span>{</span>
+<span id="cb27-18"><a href="#cb27-18" aria-hidden="true" tabindex="-1"></a>            <span class="st">&#39;commands&#39;</span>: [</span>
+<span id="cb27-19"><a href="#cb27-19" aria-hidden="true" tabindex="-1"></a>                <span class="ss">f&#39;/opt/bitbucket-scanner/run-scan.sh </span><span class="sc">{</span>project<span class="sc">}</span><span class="ss"> </span><span class="sc">{</span>repo<span class="sc">}</span><span class="ss"> </span><span class="sc">{</span>branch<span class="sc">}</span><span class="ss">&#39;</span></span>
+<span id="cb27-20"><a href="#cb27-20" aria-hidden="true" tabindex="-1"></a>            ]</span>
+<span id="cb27-21"><a href="#cb27-21" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb27-22"><a href="#cb27-22" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb27-23"><a href="#cb27-23" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb27-24"><a href="#cb27-24" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> {</span>
+<span id="cb27-25"><a href="#cb27-25" aria-hidden="true" tabindex="-1"></a>        <span class="st">&#39;statusCode&#39;</span>: <span class="dv">200</span>,</span>
+<span id="cb27-26"><a href="#cb27-26" aria-hidden="true" tabindex="-1"></a>        <span class="st">&#39;body&#39;</span>: json.dumps({</span>
+<span id="cb27-27"><a href="#cb27-27" aria-hidden="true" tabindex="-1"></a>            <span class="st">&#39;commandId&#39;</span>: response[<span class="st">&#39;Command&#39;</span>][<span class="st">&#39;CommandId&#39;</span>]</span>
+<span id="cb27-28"><a href="#cb27-28" aria-hidden="true" tabindex="-1"></a>        })</span>
+<span id="cb27-29"><a href="#cb27-29" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div>
+<p><strong>2.2 Create EventBridge Rule</strong></p>
+<div class="sourceCode" id="cb28"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create rule (daily at 2 AM UTC)</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> events put-rule <span class="dt">\</span></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--name</span> bitbucket-scanner-daily <span class="dt">\</span></span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--schedule-expression</span> <span class="st">&quot;cron(0 2 * * ? *)&quot;</span> <span class="dt">\</span></span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--state</span> ENABLED</span>
+<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-7"><a href="#cb28-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Add Lambda target</span></span>
+<span id="cb28-8"><a href="#cb28-8" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> events put-targets <span class="dt">\</span></span>
+<span id="cb28-9"><a href="#cb28-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--rule</span> bitbucket-scanner-daily <span class="dt">\</span></span>
+<span id="cb28-10"><a href="#cb28-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--targets</span> <span class="st">&quot;Id=1,Arn=arn:aws:lambda:us-east-1:ACCOUNT_ID:function:bitbucket-scanner-trigger,Input={</span><span class="dt">\&quot;</span><span class="st">project</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="st">MYPROJ</span><span class="dt">\&quot;</span><span class="st">,</span><span class="dt">\&quot;</span><span class="st">repo</span><span class="dt">\&quot;</span><span class="st">:</span><span class="dt">\&quot;</span><span class="st">backend-api</span><span class="dt">\&quot;</span><span class="st">}&quot;</span></span></code></pre></div>
+<hr />
+<h3 id="option-3-jenkinsci-integration"><strong>Option 3: Jenkins/CI
+Integration</strong></h3>
+<p>If you have Jenkins in AWS:</p>
+<div class="sourceCode" id="cb29"><pre
+class="sourceCode groovy"><code class="sourceCode groovy"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>pipeline <span class="op">{</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>    agent <span class="op">{</span> label <span class="st">&#39;bitbucket-scanner&#39;</span> <span class="op">}</span></span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a>    triggers <span class="op">{</span></span>
+<span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a>        <span class="fu">cron</span><span class="op">(</span><span class="st">&#39;0 2 * * *&#39;</span><span class="op">)</span>  <span class="co">// Daily at 2 AM</span></span>
+<span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a>    parameters <span class="op">{</span></span>
+<span id="cb29-9"><a href="#cb29-9" aria-hidden="true" tabindex="-1"></a>        <span class="fu">string</span><span class="op">(</span>name<span class="op">:</span> <span class="st">&#39;PROJECT_KEY&#39;</span><span class="op">,</span> defaultValue<span class="op">:</span> <span class="st">&#39;MYPROJ&#39;</span><span class="op">)</span></span>
+<span id="cb29-10"><a href="#cb29-10" aria-hidden="true" tabindex="-1"></a>        <span class="fu">string</span><span class="op">(</span>name<span class="op">:</span> <span class="st">&#39;REPO_SLUG&#39;</span><span class="op">,</span> defaultValue<span class="op">:</span> <span class="st">&#39;backend-api&#39;</span><span class="op">)</span></span>
+<span id="cb29-11"><a href="#cb29-11" aria-hidden="true" tabindex="-1"></a>        <span class="fu">string</span><span class="op">(</span>name<span class="op">:</span> <span class="st">&#39;BRANCH&#39;</span><span class="op">,</span> defaultValue<span class="op">:</span> <span class="st">&#39;master&#39;</span><span class="op">)</span></span>
+<span id="cb29-12"><a href="#cb29-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb29-13"><a href="#cb29-13" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb29-14"><a href="#cb29-14" aria-hidden="true" tabindex="-1"></a>    stages <span class="op">{</span></span>
+<span id="cb29-15"><a href="#cb29-15" aria-hidden="true" tabindex="-1"></a>        <span class="fu">stage</span><span class="op">(</span><span class="st">&#39;Run Security Scan&#39;</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb29-16"><a href="#cb29-16" aria-hidden="true" tabindex="-1"></a>            steps <span class="op">{</span></span>
+<span id="cb29-17"><a href="#cb29-17" aria-hidden="true" tabindex="-1"></a>                sh <span class="st">&quot;&quot;&quot;</span></span>
+<span id="cb29-18"><a href="#cb29-18" aria-hidden="true" tabindex="-1"></a><span class="st">                    cd /opt/bitbucket-scanner</span></span>
+<span id="cb29-19"><a href="#cb29-19" aria-hidden="true" tabindex="-1"></a><span class="st">                    source venv/bin/activate</span></span>
+<span id="cb29-20"><a href="#cb29-20" aria-hidden="true" tabindex="-1"></a><span class="st">                    source load-config.sh</span></span>
+<span id="cb29-21"><a href="#cb29-21" aria-hidden="true" tabindex="-1"></a><span class="st">                    python scan_repos.py </span><span class="er">\</span></span>
+<span id="cb29-22"><a href="#cb29-22" aria-hidden="true" tabindex="-1"></a><span class="st">                      --project </span><span class="ss">${</span>params<span class="op">.</span>PROJECT_KEY<span class="ss">}</span><span class="st"> </span><span class="er">\</span></span>
+<span id="cb29-23"><a href="#cb29-23" aria-hidden="true" tabindex="-1"></a><span class="st">                      --repo </span><span class="ss">${</span>params<span class="op">.</span>REPO_SLUG<span class="ss">}</span><span class="st"> </span><span class="er">\</span></span>
+<span id="cb29-24"><a href="#cb29-24" aria-hidden="true" tabindex="-1"></a><span class="st">                      --branch </span><span class="ss">${</span>params<span class="op">.</span>BRANCH<span class="ss">}</span><span class="st"> </span><span class="er">\</span></span>
+<span id="cb29-25"><a href="#cb29-25" aria-hidden="true" tabindex="-1"></a><span class="st">                      --ai</span></span>
+<span id="cb29-26"><a href="#cb29-26" aria-hidden="true" tabindex="-1"></a><span class="st">                &quot;&quot;&quot;</span></span>
+<span id="cb29-27"><a href="#cb29-27" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb29-28"><a href="#cb29-28" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb29-29"><a href="#cb29-29" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb29-30"><a href="#cb29-30" aria-hidden="true" tabindex="-1"></a>        <span class="fu">stage</span><span class="op">(</span><span class="st">&#39;Upload to S3&#39;</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb29-31"><a href="#cb29-31" aria-hidden="true" tabindex="-1"></a>            steps <span class="op">{</span></span>
+<span id="cb29-32"><a href="#cb29-32" aria-hidden="true" tabindex="-1"></a>                sh <span class="st">&quot;&quot;&quot;</span></span>
+<span id="cb29-33"><a href="#cb29-33" aria-hidden="true" tabindex="-1"></a><span class="st">                    aws s3 sync security_reports/ </span><span class="er">\</span></span>
+<span id="cb29-34"><a href="#cb29-34" aria-hidden="true" tabindex="-1"></a><span class="st">                      s3://bitbucket-security-reports/</span><span class="er">\$</span><span class="st">(date +%Y-%m-%d)/</span></span>
+<span id="cb29-35"><a href="#cb29-35" aria-hidden="true" tabindex="-1"></a><span class="st">                &quot;&quot;&quot;</span></span>
+<span id="cb29-36"><a href="#cb29-36" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb29-37"><a href="#cb29-37" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb29-38"><a href="#cb29-38" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb29-39"><a href="#cb29-39" aria-hidden="true" tabindex="-1"></a>        <span class="fu">stage</span><span class="op">(</span><span class="st">&#39;Check for Critical Issues&#39;</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb29-40"><a href="#cb29-40" aria-hidden="true" tabindex="-1"></a>            steps <span class="op">{</span></span>
+<span id="cb29-41"><a href="#cb29-41" aria-hidden="true" tabindex="-1"></a>                script <span class="op">{</span></span>
+<span id="cb29-42"><a href="#cb29-42" aria-hidden="true" tabindex="-1"></a>                    <span class="dt">def</span> report <span class="op">=</span> <span class="fu">readFile</span><span class="op">(</span><span class="st">&#39;security_reports/*/report_*.md&#39;</span><span class="op">)</span></span>
+<span id="cb29-43"><a href="#cb29-43" aria-hidden="true" tabindex="-1"></a>                    <span class="cf">if</span> <span class="op">(</span>report<span class="op">.</span><span class="fu">contains</span><span class="op">(</span><span class="st">&#39;CRITICAL&#39;</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb29-44"><a href="#cb29-44" aria-hidden="true" tabindex="-1"></a>                        <span class="fu">error</span><span class="op">(</span><span class="st">&#39;Critical security issues found!&#39;</span><span class="op">)</span></span>
+<span id="cb29-45"><a href="#cb29-45" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb29-46"><a href="#cb29-46" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb29-47"><a href="#cb29-47" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb29-48"><a href="#cb29-48" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb29-49"><a href="#cb29-49" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb29-50"><a href="#cb29-50" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb29-51"><a href="#cb29-51" aria-hidden="true" tabindex="-1"></a>    post <span class="op">{</span></span>
+<span id="cb29-52"><a href="#cb29-52" aria-hidden="true" tabindex="-1"></a>        always <span class="op">{</span></span>
+<span id="cb29-53"><a href="#cb29-53" aria-hidden="true" tabindex="-1"></a>            archiveArtifacts artifacts<span class="op">:</span> <span class="st">&#39;security_reports/**/*&#39;</span></span>
+<span id="cb29-54"><a href="#cb29-54" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb29-55"><a href="#cb29-55" aria-hidden="true" tabindex="-1"></a>        failure <span class="op">{</span></span>
+<span id="cb29-56"><a href="#cb29-56" aria-hidden="true" tabindex="-1"></a>            <span class="fu">emailext</span><span class="op">(</span></span>
+<span id="cb29-57"><a href="#cb29-57" aria-hidden="true" tabindex="-1"></a>                subject<span class="op">:</span> <span class="st">&quot;Security Scan Failed: </span><span class="ss">${</span>params<span class="op">.</span>PROJECT_KEY<span class="ss">}</span><span class="st">/</span><span class="ss">${</span>params<span class="op">.</span>REPO_SLUG<span class="ss">}</span><span class="st">&quot;</span><span class="op">,</span></span>
+<span id="cb29-58"><a href="#cb29-58" aria-hidden="true" tabindex="-1"></a>                body<span class="op">:</span> <span class="st">&quot;Check Jenkins for details&quot;</span><span class="op">,</span></span>
+<span id="cb29-59"><a href="#cb29-59" aria-hidden="true" tabindex="-1"></a>                to<span class="op">:</span> <span class="st">&quot;security-team@company.com&quot;</span></span>
+<span id="cb29-60"><a href="#cb29-60" aria-hidden="true" tabindex="-1"></a>            <span class="op">)</span></span>
+<span id="cb29-61"><a href="#cb29-61" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb29-62"><a href="#cb29-62" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb29-63"><a href="#cb29-63" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h2 id="monitoring-logging">📊 Monitoring &amp; Logging</h2>
+<h3 id="cloudwatch-logs"><strong>1. CloudWatch Logs</strong></h3>
+<p><strong>1.1 Install CloudWatch Agent</strong></p>
+<p>Already installed in user-data script. Configure it:</p>
+<div class="sourceCode" id="cb30"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> <span class="op">&gt;</span> /opt/aws/amazon-cloudwatch-agent/etc/config.json <span class="op">&lt;&lt; &#39;EOF&#39;</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="st">{</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;logs&quot;: {</span></span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;logs_collected&quot;: {</span></span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;files&quot;: {</span></span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;collect_list&quot;: [</span></span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a><span class="st">          {</span></span>
+<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a><span class="st">            &quot;file_path&quot;: &quot;/var/log/bitbucket-scanner/*.log&quot;,</span></span>
+<span id="cb30-9"><a href="#cb30-9" aria-hidden="true" tabindex="-1"></a><span class="st">            &quot;log_group_name&quot;: &quot;/aws/ec2/bitbucket-scanner&quot;,</span></span>
+<span id="cb30-10"><a href="#cb30-10" aria-hidden="true" tabindex="-1"></a><span class="st">            &quot;log_stream_name&quot;: &quot;{instance_id}/scans&quot;</span></span>
+<span id="cb30-11"><a href="#cb30-11" aria-hidden="true" tabindex="-1"></a><span class="st">          }</span></span>
+<span id="cb30-12"><a href="#cb30-12" aria-hidden="true" tabindex="-1"></a><span class="st">        ]</span></span>
+<span id="cb30-13"><a href="#cb30-13" aria-hidden="true" tabindex="-1"></a><span class="st">      }</span></span>
+<span id="cb30-14"><a href="#cb30-14" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
+<span id="cb30-15"><a href="#cb30-15" aria-hidden="true" tabindex="-1"></a><span class="st">  }</span></span>
+<span id="cb30-16"><a href="#cb30-16" aria-hidden="true" tabindex="-1"></a><span class="st">}</span></span>
+<span id="cb30-17"><a href="#cb30-17" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span>
+<span id="cb30-18"><a href="#cb30-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb30-19"><a href="#cb30-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Start agent</span></span>
+<span id="cb30-20"><a href="#cb30-20" aria-hidden="true" tabindex="-1"></a><span class="ex">/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl</span> <span class="dt">\</span></span>
+<span id="cb30-21"><a href="#cb30-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">-a</span> fetch-config <span class="dt">\</span></span>
+<span id="cb30-22"><a href="#cb30-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ec2 <span class="dt">\</span></span>
+<span id="cb30-23"><a href="#cb30-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">-s</span> <span class="dt">\</span></span>
+<span id="cb30-24"><a href="#cb30-24" aria-hidden="true" tabindex="-1"></a>  <span class="at">-c</span> file:/opt/aws/amazon-cloudwatch-agent/etc/config.json</span></code></pre></div>
+<p><strong>1.2 View Logs</strong></p>
+<div class="sourceCode" id="cb31"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Via AWS CLI</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> logs tail /aws/ec2/bitbucket-scanner <span class="at">--follow</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Or in AWS Console</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a><span class="co"># CloudWatch → Log groups → /aws/ec2/bitbucket-scanner</span></span></code></pre></div>
+<hr />
+<h3 id="cloudwatch-alarms"><strong>2. CloudWatch Alarms</strong></h3>
+<p><strong>2.1 Create Alarm for Failed Scans</strong></p>
+<div class="sourceCode" id="cb32"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudwatch put-metric-alarm <span class="dt">\</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--alarm-name</span> bitbucket-scanner-failures <span class="dt">\</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--alarm-description</span> <span class="st">&quot;Alert when scanner fails&quot;</span> <span class="dt">\</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--metric-name</span> Errors <span class="dt">\</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--namespace</span> AWS/Lambda <span class="dt">\</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--statistic</span> Sum <span class="dt">\</span></span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--period</span> 300 <span class="dt">\</span></span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--threshold</span> 1 <span class="dt">\</span></span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--comparison-operator</span> GreaterThanThreshold <span class="dt">\</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--evaluation-periods</span> 1 <span class="dt">\</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--alarm-actions</span> arn:aws:sns:us-east-1:ACCOUNT_ID:security-alerts</span></code></pre></div>
+<hr />
+<h3 id="cost-monitoring"><strong>3. Cost Monitoring</strong></h3>
+<p><strong>3.1 Set Up Budget Alert</strong></p>
+<div class="sourceCode" id="cb33"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> budgets create-budget <span class="dt">\</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--account-id</span> <span class="va">$(</span><span class="ex">aws</span> sts get-caller-identity <span class="at">--query</span> Account <span class="at">--output</span> text<span class="va">)</span> <span class="dt">\</span></span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--budget</span> <span class="st">&#39;{</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;BudgetName&quot;: &quot;bitbucket-scanner-budget&quot;,</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;BudgetLimit&quot;: {</span></span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Amount&quot;: &quot;100&quot;,</span></span>
+<span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Unit&quot;: &quot;USD&quot;</span></span>
+<span id="cb33-8"><a href="#cb33-8" aria-hidden="true" tabindex="-1"></a><span class="st">    },</span></span>
+<span id="cb33-9"><a href="#cb33-9" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;TimeUnit&quot;: &quot;MONTHLY&quot;,</span></span>
+<span id="cb33-10"><a href="#cb33-10" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;BudgetType&quot;: &quot;COST&quot;</span></span>
+<span id="cb33-11"><a href="#cb33-11" aria-hidden="true" tabindex="-1"></a><span class="st">  }&#39;</span> <span class="dt">\</span></span>
+<span id="cb33-12"><a href="#cb33-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--notifications-with-subscribers</span> <span class="st">&#39;[</span></span>
+<span id="cb33-13"><a href="#cb33-13" aria-hidden="true" tabindex="-1"></a><span class="st">    {</span></span>
+<span id="cb33-14"><a href="#cb33-14" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Notification&quot;: {</span></span>
+<span id="cb33-15"><a href="#cb33-15" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;NotificationType&quot;: &quot;ACTUAL&quot;,</span></span>
+<span id="cb33-16"><a href="#cb33-16" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;ComparisonOperator&quot;: &quot;GREATER_THAN&quot;,</span></span>
+<span id="cb33-17"><a href="#cb33-17" aria-hidden="true" tabindex="-1"></a><span class="st">        &quot;Threshold&quot;: 80</span></span>
+<span id="cb33-18"><a href="#cb33-18" aria-hidden="true" tabindex="-1"></a><span class="st">      },</span></span>
+<span id="cb33-19"><a href="#cb33-19" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;Subscribers&quot;: [</span></span>
+<span id="cb33-20"><a href="#cb33-20" aria-hidden="true" tabindex="-1"></a><span class="st">        {</span></span>
+<span id="cb33-21"><a href="#cb33-21" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;SubscriptionType&quot;: &quot;EMAIL&quot;,</span></span>
+<span id="cb33-22"><a href="#cb33-22" aria-hidden="true" tabindex="-1"></a><span class="st">          &quot;Address&quot;: &quot;devops@company.com&quot;</span></span>
+<span id="cb33-23"><a href="#cb33-23" aria-hidden="true" tabindex="-1"></a><span class="st">        }</span></span>
+<span id="cb33-24"><a href="#cb33-24" aria-hidden="true" tabindex="-1"></a><span class="st">      ]</span></span>
+<span id="cb33-25"><a href="#cb33-25" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
+<span id="cb33-26"><a href="#cb33-26" aria-hidden="true" tabindex="-1"></a><span class="st">  ]&#39;</span></span></code></pre></div>
+<hr />
+<h2 id="cost-estimates">💰 Cost Estimates</h2>
+<h3 id="monthly-costs"><strong>Monthly Costs</strong></h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Usage</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EC2 t3.medium</strong></td>
+<td>730 hours/month</td>
+<td>$30.37</td>
+</tr>
+<tr>
+<td><strong>EBS 30GB gp3</strong></td>
+<td>30 GB</td>
+<td>$2.40</td>
+</tr>
+<tr>
+<td><strong>S3 Standard</strong></td>
+<td>10 GB storage</td>
+<td>$0.23</td>
+</tr>
+<tr>
+<td><strong>S3 Requests</strong></td>
+<td>10,000 PUTs</td>
+<td>$0.05</td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td>1 secret</td>
+<td>$0.40</td>
+</tr>
+<tr>
+<td><strong>CloudWatch Logs</strong></td>
+<td>5 GB ingested</td>
+<td>$2.50</td>
+</tr>
+<tr>
+<td><strong>Bedrock (Claude 3.5)</strong></td>
+<td>100 scans/month</td>
+<td>$3-15</td>
+</tr>
+<tr>
+<td><strong>Data Transfer</strong></td>
+<td>10 GB out</td>
+<td>$0.90</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total: ~$40-55/month</strong></p>
+<h3 id="bedrock-cost-calculation"><strong>Bedrock Cost
+Calculation</strong></h3>
+<p>Assuming average scan: - Input: 50,000 tokens (~$0.15) - Output:
+5,000 tokens (~$0.075) - <strong>Total per scan: ~$0.23</strong></p>
+<p>100 scans/month = ~$23</p>
+<hr />
+<h2 id="troubleshooting">🔧 Troubleshooting</h2>
+<h3 id="connection-to-bitbucket-server-fails"><strong>1. Connection to
+Bitbucket Server Fails</strong></h3>
+<p><strong>Symptoms:</strong></p>
+<pre><code>[X] Failed to connect to Bitbucket Server</code></pre>
+<p><strong>Solutions:</strong> - Check VPN/VPC peering is active -
+Verify security group allows outbound HTTPS - Test connectivity:
+<code>curl https://bitbucket.yourcompany.com</code> - Check Bitbucket
+firewall allows AWS IP range</p>
+<hr />
+<h3 id="bedrock-access-denied"><strong>2. Bedrock Access
+Denied</strong></h3>
+<p><strong>Symptoms:</strong></p>
+<pre><code>[X] Failed to initialize AI client: An error occurred (AccessDeniedException)</code></pre>
+<p><strong>Solutions:</strong> - Verify IAM role is attached to EC2
+instance - Check Bedrock model access is granted - Verify region is
+correct (us-east-1) - Check IAM policy syntax</p>
+<div class="sourceCode" id="cb36"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify IAM role</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> ec2 describe-instances <span class="dt">\</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--instance-ids</span> i-xxxxxxxxx <span class="dt">\</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--query</span> <span class="st">&#39;Reservations[0].Instances[0].IamInstanceProfile&#39;</span></span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Test Bedrock access</span></span>
+<span id="cb36-7"><a href="#cb36-7" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> bedrock list-foundation-models <span class="at">--region</span> us-east-1</span></code></pre></div>
+<hr />
+<h3 id="out-of-memory"><strong>3. Out of Memory</strong></h3>
+<p><strong>Symptoms:</strong></p>
+<pre><code>MemoryError: Unable to allocate array</code></pre>
+<p><strong>Solutions:</strong> - Increase EC2 instance size (t3.large or
+t3.xlarge) - Add swap space - Reduce <code>AI_MAX_FILE_SIZE</code> in
+config</p>
+<hr />
+<h3 id="git-clone-fails"><strong>4. Git Clone Fails</strong></h3>
+<p><strong>Symptoms:</strong></p>
+<pre><code>[X] Failed to clone repository</code></pre>
+<p><strong>Solutions:</strong> - Check Git credentials are configured -
+For HTTPS: Configure Git credential helper - For SSH: Add SSH key to
+<code>~/.ssh/</code></p>
+<div class="sourceCode" id="cb39"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Configure Git credential helper</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> config <span class="at">--global</span> credential.helper store</span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;https://username:token@bitbucket.yourcompany.com&quot;</span> <span class="op">&gt;</span> ~/.git-credentials</span></code></pre></div>
+<hr />
+<h2 id="deployment-checklist">📋 Deployment Checklist</h2>
+<p>Use this checklist to ensure everything is set up:</p>
+<h3 id="aws-resources"><strong>AWS Resources</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />IAM role created with Bedrock, S3,
+Secrets Manager permissions</label></li>
+<li><label><input type="checkbox" />Instance profile created and
+attached to IAM role</label></li>
+<li><label><input type="checkbox" />Bedrock model access granted (Claude
+3.5 Sonnet)</label></li>
+<li><label><input type="checkbox" />S3 bucket created for
+reports</label></li>
+<li><label><input type="checkbox" />Secrets Manager secret created with
+Bitbucket credentials</label></li>
+<li><label><input type="checkbox" />Security group created with proper
+rules</label></li>
+<li><label><input type="checkbox" />EC2 instance launched with correct
+instance profile</label></li>
+</ul>
+<h3 id="networking"><strong>Networking</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />VPN/VPC peering configured to data
+center</label></li>
+<li><label><input type="checkbox" />Security group allows outbound HTTPS
+to Bitbucket Server</label></li>
+<li><label><input type="checkbox" />Bitbucket Server firewall allows AWS
+IP ranges</label></li>
+<li><label><input type="checkbox" />Test connectivity: EC2 → Bitbucket
+Server</label></li>
+</ul>
+<h3 id="application-setup"><strong>Application Setup</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Scanner code uploaded to
+EC2</label></li>
+<li><label><input type="checkbox" />Python dependencies
+installed</label></li>
+<li><label><input type="checkbox" />Configuration file (.env or
+load-config.sh) created</label></li>
+<li><label><input type="checkbox" />Test scan completed
+successfully</label></li>
+<li><label><input type="checkbox" />Reports generated and
+viewable</label></li>
+</ul>
+<h3 id="automation"><strong>Automation</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Cron jobs configured (if using
+cron)</label></li>
+<li><label><input type="checkbox" />EventBridge rules created (if using
+EventBridge)</label></li>
+<li><label><input type="checkbox" />CI/CD pipeline configured (if using
+Jenkins/GitLab)</label></li>
+<li><label><input type="checkbox" />Test automated scan
+execution</label></li>
+</ul>
+<h3 id="monitoring"><strong>Monitoring</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />CloudWatch Logs agent
+configured</label></li>
+<li><label><input type="checkbox" />Log group created and receiving
+logs</label></li>
+<li><label><input type="checkbox" />CloudWatch alarms
+created</label></li>
+<li><label><input type="checkbox" />Budget alerts
+configured</label></li>
+<li><label><input type="checkbox" />Notification email
+tested</label></li>
+</ul>
+<h3 id="documentation"><strong>Documentation</strong></h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Runbook created for common
+operations</label></li>
+<li><label><input type="checkbox" />Access credentials documented
+(securely)</label></li>
+<li><label><input type="checkbox" />On-call procedures
+documented</label></li>
+<li><label><input type="checkbox" />Cost monitoring dashboard
+created</label></li>
+</ul>
+<hr />
+<h2 id="support-next-steps">📞 Support &amp; Next Steps</h2>
+<h3 id="quick-commands-reference"><strong>Quick Commands
+Reference</strong></h3>
+<div class="sourceCode" id="cb40"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="co"># SSH to scanner</span></span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ssh</span> <span class="at">-i</span> key.pem ec2-user@<span class="va">$INSTANCE_IP</span></span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a><span class="co"># View logs</span></span>
+<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a><span class="fu">tail</span> <span class="at">-f</span> /var/log/bitbucket-scanner/scan_<span class="pp">*</span>.log</span>
+<span id="cb40-6"><a href="#cb40-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-7"><a href="#cb40-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Manual scan</span></span>
+<span id="cb40-8"><a href="#cb40-8" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /opt/bitbucket-scanner</span>
+<span id="cb40-9"><a href="#cb40-9" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span>
+<span id="cb40-10"><a href="#cb40-10" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> load-config.sh</span>
+<span id="cb40-11"><a href="#cb40-11" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> scan_repos.py <span class="at">--project</span> PROJ <span class="at">--repo</span> repo-name <span class="at">--ai</span></span>
+<span id="cb40-12"><a href="#cb40-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-13"><a href="#cb40-13" aria-hidden="true" tabindex="-1"></a><span class="co"># View reports</span></span>
+<span id="cb40-14"><a href="#cb40-14" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-la</span> security_reports/</span>
+<span id="cb40-15"><a href="#cb40-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-16"><a href="#cb40-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Upload to S3</span></span>
+<span id="cb40-17"><a href="#cb40-17" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3 sync security_reports/ s3://bitbucket-security-reports/</span>
+<span id="cb40-18"><a href="#cb40-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-19"><a href="#cb40-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Check CloudWatch logs</span></span>
+<span id="cb40-20"><a href="#cb40-20" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> logs tail /aws/ec2/bitbucket-scanner <span class="at">--follow</span></span></code></pre></div>
+<hr />
+<h2 id="success-criteria">🎯 Success Criteria</h2>
+<p>Your deployment is successful when:</p>
+<ol type="1">
+<li>✅ Scanner can connect to Bitbucket Server</li>
+<li>✅ Scanner can successfully clone and scan repositories</li>
+<li>✅ AI analysis (Bedrock) works correctly</li>
+<li>✅ Reports are generated and uploaded to S3</li>
+<li>✅ Automated scans run on schedule</li>
+<li>✅ CloudWatch logs are being collected</li>
+<li>✅ Cost is within expected range (~$40-55/month)</li>
+</ol>
+<hr />
+<p><strong>Deployment complete!</strong> 🎉</p>
+<p>For questions or issues, contact: [Your DevOps Team Email]</p>
